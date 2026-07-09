@@ -177,11 +177,21 @@
         <span class="font-size-label" id="fontLabel">28px</span>
         <button class="font-btn" onclick="changeFontSize(4)">+</button>
       </div>
+      <span class="status" id="viewerCount" title="viewers">Viewers 0</span>
+      <button class="btn btn-clear" onclick="showQR()">QR</button>
+      <button class="btn btn-clear" onclick="saveSession()">Save</button>
       <button class="btn btn-clear" onclick="clearAll()">Clear</button>
       <button class="btn btn-play" id="playBtn" onclick="startListening()">Play</button>
       <button class="btn btn-pause" id="pauseBtn" onclick="pauseListening()" disabled>Pause</button>
       <button class="btn btn-stop" id="stopBtn" onclick="stopListening()" disabled>Stop</button>
     </div>
+  </div>
+  <div id="qrOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:2000; align-items:center; justify-content:center; flex-direction:column; gap:16px;" onclick="this.style.display='none'">
+    <div style="background:#fff; padding:20px; border-radius:16px;">
+      <img id="qrImg" width="280" height="280" alt="QR">
+    </div>
+    <p style="color:#fff; font-size:14px; text-align:center; padding:0 24px; word-break:break-all;" id="qrUrl"></p>
+    <p style="color:#888; font-size:13px;">Tap anywhere to close</p>
   </div>
   <div class="main">
     <div class="chinese-area" id="chineseArea">
@@ -212,8 +222,9 @@
 </div>
 
 <script>
-  const SYNC_URL = 'https://regtorg-webhook-production.up.railway.app/sermon/sync';
-  const API_URL = 'https://regtorg-webhook-production.up.railway.app/sermon/translate';
+  const BASE_URL = 'https://regtorg-webhook-production.up.railway.app';
+  const SYNC_URL = BASE_URL + '/sermon/sync';
+  const API_URL = BASE_URL + '/sermon/translate';
 
   // ─── MODE SELECTION ───
   function initController() {
@@ -244,6 +255,45 @@
     if (!SpeechRecognition) {
       alert('This browser does not support Speech Recognition. Please use Chrome.');
     }
+    // restore from localStorage after refresh
+    try {
+      const savedKo = localStorage.getItem('sermon_ko') || '';
+      const savedZh = localStorage.getItem('sermon_zh') || '';
+      if (savedKo || savedZh) {
+        finalKorean = savedKo;
+        finalChinese = savedZh;
+        document.getElementById('koreanText').innerText = finalKorean;
+        document.getElementById('chineseText').innerText = finalChinese;
+        setTimeout(scrollToBottom, 100);
+      }
+    } catch (e) {}
+  }
+
+  function persistLocal() {
+    try {
+      localStorage.setItem('sermon_ko', finalKorean);
+      localStorage.setItem('sermon_zh', finalChinese);
+    } catch (e) {}
+  }
+
+  function showQR() {
+    const url = location.href.split('#')[0];
+    document.getElementById('qrImg').src =
+      'https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=' + encodeURIComponent(url);
+    document.getElementById('qrUrl').textContent = url;
+    document.getElementById('qrOverlay').style.display = 'flex';
+  }
+
+  function saveSession() {
+    if (!finalKorean.trim() && !finalChinese.trim()) { alert('Nothing to save.'); return; }
+    fetch(BASE_URL + '/sermon/session/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ korean: finalKorean, chinese: finalChinese })
+    })
+    .then(r => r.json())
+    .then(d => alert(d.ok ? 'Saved. View at /sermon/history' : 'Save failed: ' + (d.error || '')))
+    .catch(() => alert('Save failed: network error'));
   }
 
   function enterEditMode() {
@@ -274,6 +324,7 @@
   }
 
   function syncToServer() {
+    persistLocal();
     fetch(SYNC_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -283,7 +334,14 @@
         interimChinese: interimChinese,
         ts: Date.now()
       })
-    }).catch(() => {});
+    })
+    .then(r => r.json())
+    .then(d => {
+      if (d && typeof d.viewers === 'number') {
+        document.getElementById('viewerCount').textContent = 'Viewers ' + d.viewers;
+      }
+    })
+    .catch(() => {});
   }
 
   function createRecognition() {
@@ -317,8 +375,9 @@
         else interimTranscript += transcript;
       }
       if (newFinal) {
+        const ctx = finalKorean.slice(-200);
         finalKorean += newFinal;
-        translateText(newFinal, true);
+        enqueueFinal(newFinal, ctx);
       }
       const kt = document.getElementById('koreanText');
       if (!isEditing) {
@@ -376,40 +435,81 @@
   let interimTimer = null;
   function debounceTranslateInterim(text) {
     clearTimeout(interimTimer);
-    interimTimer = setTimeout(() => translateText(text, false), 300);
+    interimTimer = setTimeout(() => translateInterim(text), 300);
   }
 
-  async function translateText(text, isFinal) {
+  // ─── Final translation: sequential queue with retry ───
+  // Guarantees order and prevents lost sentences on API failure.
+  const finalQueue = [];
+  let processingFinal = false;
+
+  function enqueueFinal(text, ctx) {
+    if (!text.trim()) return;
+    finalQueue.push({ text: text, ctx: ctx || '', tries: 0 });
+    processFinalQueue();
+  }
+
+  async function processFinalQueue() {
+    if (processingFinal) return;
+    processingFinal = true;
+    while (finalQueue.length > 0) {
+      const item = finalQueue[0];
+      try {
+        const res = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: item.text, context: item.ctx })
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'translate failed');
+        applyFinalTranslation(data.translated);
+        finalQueue.shift();
+      } catch (err) {
+        item.tries++;
+        if (item.tries >= 5) {
+          console.error('Translation gave up after 5 tries:', item.text);
+          finalQueue.shift();
+        } else {
+          await new Promise(r => setTimeout(r, 2000));
+        }
+      }
+    }
+    processingFinal = false;
+  }
+
+  function applyFinalTranslation(translated) {
+    if (isEditing) {
+      pendingQueue.push(translated);
+      interimChinese = '';
+    } else {
+      finalChinese += translated;
+      interimChinese = '';
+      document.getElementById('chineseText').innerHTML = finalChinese;
+    }
+    syncToServer();
+    if (!isEditing) scrollToBottom();
+  }
+
+  // ─── Interim translation: best-effort, no retry ───
+  async function translateInterim(text) {
     if (!text.trim()) return;
     try {
       const res = await fetch(API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: text })
+        body: JSON.stringify({ text: text, context: finalKorean.slice(-200) })
       });
       const data = await res.json();
       if (data.ok) {
-        if (isFinal) {
-          if (isEditing) {
-            // queue it, don't touch the DOM
-            pendingQueue.push(data.translated);
-            interimChinese = '';
-          } else {
-            finalChinese += data.translated;
-            interimChinese = '';
-            document.getElementById('chineseText').innerHTML = finalChinese;
-          }
-        } else {
-          interimChinese = data.translated;
-          if (!isEditing) {
-            document.getElementById('chineseText').innerHTML =
-              finalChinese + '<span class="interim">' + data.translated + '</span>';
-          }
+        interimChinese = data.translated;
+        if (!isEditing) {
+          document.getElementById('chineseText').innerHTML =
+            finalChinese + '<span class="interim">' + data.translated + '</span>';
+          scrollToBottom();
         }
         syncToServer();
-        if (!isEditing) scrollToBottom();
       }
-    } catch (err) { console.error('Translation error:', err); }
+    } catch (err) { console.error('Interim translation error:', err); }
   }
 
   function scrollToBottom() {
@@ -420,10 +520,13 @@
   }
 
   function clearAll() {
+    if (!confirm('Clear all text?')) return;
     finalKorean = ''; finalChinese = ''; interimChinese = '';
     pendingQueue = [];
+    finalQueue.length = 0;
     document.getElementById('koreanText').innerHTML = '';
     document.getElementById('chineseText').innerHTML = '';
+    try { localStorage.removeItem('sermon_ko'); localStorage.removeItem('sermon_zh'); } catch (e) {}
     syncToServer();
   }
 
@@ -539,9 +642,11 @@
     }
   }
 
+  const VIEWER_ID = Math.random().toString(36).slice(2, 10);
+
   async function fetchSync() {
     try {
-      const res = await fetch(SYNC_URL);
+      const res = await fetch(SYNC_URL + '?vid=' + VIEWER_ID);
       const data = await res.json();
       if (data.ts > lastTs) {
         lastTs = data.ts;
