@@ -415,6 +415,8 @@
   function scrollToBottom() {
     const ca = document.getElementById('chineseArea');
     if (ca) ca.scrollTop = ca.scrollHeight;
+    const ka = document.querySelector('.korean-area');
+    if (ka) ka.scrollTop = ka.scrollHeight;
   }
 
   function clearAll() {
