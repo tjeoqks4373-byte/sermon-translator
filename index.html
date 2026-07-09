@@ -85,21 +85,16 @@
   .font-btn:hover { background: #444; }
   .font-size-label { font-size: 12px; color: #888; min-width: 32px; text-align: center; }
 
-  /* Edit banner - fixed bottom */
+  /* Edit banner - just above korean typing bar */
   .edit-banner {
     display: none;
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
     background: #e94560;
     color: white;
-    padding: 14px 16px;
+    padding: 12px 16px;
     text-align: center;
-    font-size: 16px;
+    font-size: 15px;
     font-weight: 600;
     cursor: pointer;
-    z-index: 100;
   }
   .edit-banner.visible { display: block; }
 
@@ -186,11 +181,11 @@
     <div class="chinese-area" id="chineseArea">
       <div class="chinese-text" id="chineseText" contenteditable="true"></div>
     </div>
+    <div class="edit-banner" id="editBanner" onclick="exitEditMode()">EDITING MODE - Tap here to resume live</div>
     <div class="korean-area">
       <div class="korean-text" id="koreanText" contenteditable="true"></div>
     </div>
   </div>
-  <div class="edit-banner" id="editBanner" onclick="exitEditMode()">EDITING MODE - Tap here to resume live</div>
 </div>
 
 <!-- Viewer mode -->
