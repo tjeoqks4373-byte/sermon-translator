@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Korean → Chinese Live Translator</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+    background: #1a1a2e;
+    color: #eee;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  .header {
+    padding: 12px 16px;
+    background: #16213e;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid #333;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .header h1 { font-size: 16px; font-weight: 600; }
+  .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .btn {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-play { background: #4ecca3; color: white; }
+  .btn-play:hover { background: #3dbb92; }
+  .btn-play.active { animation: pulse 1.5s infinite; }
+  .btn-pause { background: #f0a500; color: white; }
+  .btn-pause:hover { background: #d99400; }
+  .btn-stop { background: #e94560; color: white; }
+  .btn-stop:hover { background: #c73e54; }
+  .btn-clear { background: #333; color: #ccc; }
+  .btn-clear:hover { background: #444; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(78, 204, 163, 0.4); }
+    50% { box-shadow: 0 0 0 12px rgba(78, 204, 163, 0); }
+  }
+  .status { font-size: 13px; color: #888; }
+  .status.active { color: #4ecca3; }
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .chinese-area {
+    flex: 1; padding: 24px; overflow-y: auto;
+    display: flex; flex-direction: column; justify-content: flex-end;
+  }
+  .chinese-text {
+    font-size: 42px; line-height: 1.6; color: #fff;
+    word-break: break-word; outline: none; min-height: 50px;
+  }
+  .chinese-text:focus { border-left: 3px solid #4ecca3; padding-left: 12px; }
+  .chinese-text .interim { color: #888; }
+  .korean-area {
+    padding: 12px 24px; background: #16213e;
+    border-top: 1px solid #333; max-height: 30vh; overflow-y: auto;
+  }
+  .korean-text {
+    font-size: 18px; line-height: 1.8; color: #aaa;
+    word-break: break-word; outline: none; min-height: 30px;
+  }
+  .korean-text:focus { border-left: 3px solid #f0a500; padding-left: 12px; }
+  .korean-text .interim { color: #666; }
+  .font-controls { display: flex; gap: 6px; align-items: center; }
+  .font-btn {
+    background: #333; color: #ccc; border: none; border-radius: 4px;
+    width: 28px; height: 28px; font-size: 16px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .font-btn:hover { background: #444; }
+  .font-size-label { font-size: 12px; color: #888; min-width: 32px; text-align: center; }
+
+  /* Mode selector */
+  .mode-select {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: #1a1a2e; display: flex; align-items: center;
+    justify-content: center; z-index: 1000;
+  }
+  .mode-box {
+    text-align: center; max-width: 500px; padding: 32px;
+  }
+  .mode-box h2 { font-size: 28px; margin-bottom: 12px; }
+  .mode-box p { font-size: 16px; color: #aaa; margin-bottom: 40px; }
+  .mode-buttons { display: flex; gap: 24px; justify-content: center; flex-wrap: wrap; }
+  .mode-btn {
+    background: #16213e; border: 2px solid #333; border-radius: 16px;
+    padding: 32px 40px; cursor: pointer; transition: all 0.2s;
+    text-align: center; min-width: 200px;
+  }
+  .mode-btn:hover { border-color: #4ecca3; }
+  .mode-btn h3 { font-size: 20px; color: #fff; margin-bottom: 8px; }
+  .mode-btn p { font-size: 14px; color: #888; margin: 0; }
+
+  /* Viewer mode */
+  .viewer-header {
+    padding: 12px 24px;
+    background: #16213e;
+    border-bottom: 1px solid #333;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .viewer-header h1 { font-size: 16px; }
+  .sync-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #e94560; display: inline-block; margin-right: 8px;
+  }
+  .sync-dot.connected { background: #4ecca3; animation: pulse-dot 2s infinite; }
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Mode selector -->
+<div class="mode-select" id="modeSelect">
+  <div class="mode-box">
+    <h2>Sermon Translator</h2>
+    <p>Korean → Chinese (Simplified)</p>
+    <div class="mode-buttons">
+      <div class="mode-btn" onclick="initController()">
+        <h3>Controller</h3>
+        <p>Mic + Edit + Translate<br>(Your phone)</p>
+      </div>
+      <div class="mode-btn" onclick="initViewer()">
+        <h3>Viewer</h3>
+        <p>Display only<br>(Customer iPad)</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Controller mode -->
+<div id="controllerUI" style="display:none; flex-direction:column; min-height:100vh;">
+  <div class="header">
+    <h1>Controller</h1>
+    <div class="controls">
+      <span class="status" id="status">Ready</span>
+      <div class="font-controls">
+        <button class="font-btn" onclick="changeFontSize(-4)">-</button>
+        <span class="font-size-label" id="fontLabel">42px</span>
+        <button class="font-btn" onclick="changeFontSize(4)">+</button>
+      </div>
+      <button class="btn btn-clear" onclick="clearAll()">Clear</button>
+      <button class="btn btn-play" id="playBtn" onclick="startListening()">Play</button>
+      <button class="btn btn-pause" id="pauseBtn" onclick="pauseListening()" disabled>Pause</button>
+      <button class="btn btn-stop" id="stopBtn" onclick="stopListening()" disabled>Stop</button>
+    </div>
+  </div>
+  <div class="main">
+    <div class="chinese-area" id="chineseArea">
+      <div class="chinese-text" id="chineseText" contenteditable="true"></div>
+    </div>
+    <div class="korean-area">
+      <div class="korean-text" id="koreanText" contenteditable="true"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Viewer mode -->
+<div id="viewerUI" style="display:none; flex-direction:column; min-height:100vh;">
+  <div class="viewer-header">
+    <h1><span class="sync-dot" id="syncDot"></span> Live Translation</h1>
+    <div class="font-controls">
+      <button class="font-btn" onclick="changeFontSizeViewer(-4)">-</button>
+      <span class="font-size-label" id="fontLabelViewer">42px</span>
+      <button class="font-btn" onclick="changeFontSizeViewer(4)">+</button>
+    </div>
+  </div>
+  <div class="main">
+    <div class="chinese-area">
+      <div class="chinese-text" id="viewerChinese" style="cursor:default;"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const SYNC_URL = 'https://regtorg-webhook-production.up.railway.app/sermon/sync';
+  const API_URL = 'https://regtorg-webhook-production.up.railway.app/sermon/translate';
+
+  // ─── MODE SELECTION ───
+  function initController() {
+    document.getElementById('modeSelect').style.display = 'none';
+    document.getElementById('controllerUI').style.display = 'flex';
+    setupController();
+  }
+
+  function initViewer() {
+    document.getElementById('modeSelect').style.display = 'none';
+    document.getElementById('viewerUI').style.display = 'flex';
+    setupViewer();
+  }
+
+  // ─── CONTROLLER MODE ───
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  let recState = 'stopped';
+  let finalKorean = '';
+  let finalChinese = '';
+  let fontSize = 42;
+  let recognition = null;
+
+  function setupController() {
+    if (!SpeechRecognition) {
+      alert('This browser does not support Speech Recognition. Please use Chrome.');
+    }
+  }
+
+  function syncToServer() {
+    fetch(SYNC_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        korean: finalKorean,
+        chinese: finalChinese,
+        ts: Date.now()
+      })
+    }).catch(() => {});
+  }
+
+  function createRecognition() {
+    const r = new SpeechRecognition();
+    r.lang = 'ko-KR';
+    r.continuous = true;
+    r.interimResults = true;
+    r.maxAlternatives = 1;
+
+    r.onstart = () => { recState = 'listening'; updateButtons(); };
+
+    r.onend = () => {
+      if (recState === 'listening') {
+        try { recognition = createRecognition(); recognition.start(); } catch(e) {}
+        return;
+      }
+      updateButtons();
+    };
+
+    r.onerror = (e) => {
+      if (e.error === 'no-speech' || e.error === 'aborted') return;
+      console.error('Speech error:', e.error);
+    };
+
+    r.onresult = (event) => {
+      let interimTranscript = '';
+      let newFinal = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) newFinal += transcript;
+        else interimTranscript += transcript;
+      }
+      if (newFinal) {
+        finalKorean += newFinal;
+        translateText(newFinal, true);
+      }
+      const kt = document.getElementById('koreanText');
+      kt.innerHTML = finalKorean +
+        (interimTranscript ? '<span class="interim">' + interimTranscript + '</span>' : '');
+      if (interimTranscript) debounceTranslateInterim(interimTranscript);
+      scrollToBottom();
+    };
+
+    return r;
+  }
+
+  function updateButtons() {
+    const playBtn = document.getElementById('playBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const statusEl = document.getElementById('status');
+    if (recState === 'stopped') {
+      playBtn.disabled = false; pauseBtn.disabled = true; stopBtn.disabled = true;
+      playBtn.classList.remove('active');
+      statusEl.textContent = 'Ready'; statusEl.classList.remove('active');
+    } else if (recState === 'listening') {
+      playBtn.disabled = true; pauseBtn.disabled = false; stopBtn.disabled = false;
+      playBtn.classList.add('active');
+      statusEl.textContent = 'Listening'; statusEl.classList.add('active');
+    } else if (recState === 'paused') {
+      playBtn.disabled = false; pauseBtn.disabled = true; stopBtn.disabled = false;
+      playBtn.classList.remove('active');
+      statusEl.textContent = 'Paused'; statusEl.classList.remove('active');
+    }
+  }
+
+  function startListening() {
+    recState = 'listening'; updateButtons();
+    recognition = createRecognition();
+    try { recognition.start(); } catch(e) {}
+  }
+  function pauseListening() {
+    recState = 'paused'; updateButtons();
+    if (recognition) recognition.stop();
+  }
+  function stopListening() {
+    recState = 'stopped'; updateButtons();
+    if (recognition) recognition.stop();
+  }
+
+  let interimTimer = null;
+  function debounceTranslateInterim(text) {
+    clearTimeout(interimTimer);
+    interimTimer = setTimeout(() => translateText(text, false), 300);
+  }
+
+  async function translateText(text, isFinal) {
+    if (!text.trim()) return;
+    try {
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: text })
+      });
+      const data = await res.json();
+      if (data.ok) {
+        const ct = document.getElementById('chineseText');
+        if (isFinal) {
+          finalChinese += data.translated;
+          ct.innerHTML = finalChinese;
+          syncToServer();
+        } else {
+          ct.innerHTML = finalChinese + '<span class="interim">' + data.translated + '</span>';
+        }
+        scrollToBottom();
+      }
+    } catch (err) { console.error('Translation error:', err); }
+  }
+
+  function scrollToBottom() {
+    const ca = document.getElementById('chineseArea');
+    if (ca) ca.scrollTop = ca.scrollHeight;
+  }
+
+  function clearAll() {
+    finalKorean = ''; finalChinese = '';
+    document.getElementById('koreanText').innerHTML = '';
+    document.getElementById('chineseText').innerHTML = '';
+    syncToServer();
+  }
+
+  function changeFontSize(delta) {
+    fontSize = Math.max(20, Math.min(80, fontSize + delta));
+    document.getElementById('chineseText').style.fontSize = fontSize + 'px';
+    document.getElementById('fontLabel').textContent = fontSize + 'px';
+  }
+
+  // Korean edit → re-translate + sync
+  document.addEventListener('DOMContentLoaded', () => {
+    const ct = document.getElementById('chineseText');
+    const kt = document.getElementById('koreanText');
+    if (ct) ct.addEventListener('input', () => {
+      finalChinese = ct.innerText;
+      syncToServer();
+    });
+
+    let koreanEditTimer = null;
+    if (kt) kt.addEventListener('input', () => {
+      finalKorean = kt.innerText;
+      clearTimeout(koreanEditTimer);
+      koreanEditTimer = setTimeout(async () => {
+        const text = kt.innerText.trim();
+        if (!text) return;
+        try {
+          const res = await fetch(API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: text })
+          });
+          const data = await res.json();
+          if (data.ok) {
+            finalChinese = data.translated;
+            ct.innerText = finalChinese;
+            syncToServer();
+          }
+        } catch (err) { console.error('Re-translation error:', err); }
+      }, 800);
+    });
+  });
+
+  // ─── VIEWER MODE ───
+  let viewerFontSize = 42;
+  let lastTs = 0;
+
+  function setupViewer() {
+    document.getElementById('syncDot').classList.add('connected');
+    setInterval(fetchSync, 500);
+  }
+
+  async function fetchSync() {
+    try {
+      const res = await fetch(SYNC_URL);
+      const data = await res.json();
+      if (data.ts > lastTs) {
+        lastTs = data.ts;
+        document.getElementById('viewerChinese').innerText = data.chinese;
+      }
+    } catch (e) {
+      document.getElementById('syncDot').classList.remove('connected');
+    }
+  }
+
+  function changeFontSizeViewer(delta) {
+    viewerFontSize = Math.max(20, Math.min(80, viewerFontSize + delta));
+    document.getElementById('viewerChinese').style.fontSize = viewerFontSize + 'px';
+    document.getElementById('fontLabelViewer').textContent = viewerFontSize + 'px';
+  }
+
+  window.addEventListener('beforeunload', () => {
+    recState = 'stopped';
+    if (recognition) recognition.stop();
+  });
+</script>
+</body>
+</html>
