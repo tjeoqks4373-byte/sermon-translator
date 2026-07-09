@@ -61,7 +61,7 @@
   }
   .chinese-area.editing-mode { border: 2px solid #e94560; }
   .chinese-text {
-    font-size: 42px; line-height: 1.6; color: #fff;
+    font-size: 28px; line-height: 1.6; color: #fff;
     word-break: break-word; outline: none; min-height: 50px;
   }
   .chinese-text:focus { border-left: 3px solid #4ecca3; padding-left: 12px; }
@@ -173,7 +173,7 @@
       <span class="status" id="status">Ready</span>
       <div class="font-controls">
         <button class="font-btn" onclick="changeFontSize(-4)">-</button>
-        <span class="font-size-label" id="fontLabel">42px</span>
+        <span class="font-size-label" id="fontLabel">28px</span>
         <button class="font-btn" onclick="changeFontSize(4)">+</button>
       </div>
       <button class="btn btn-clear" onclick="clearAll()">Clear</button>
@@ -182,7 +182,6 @@
       <button class="btn btn-stop" id="stopBtn" onclick="stopListening()" disabled>Stop</button>
     </div>
   </div>
-  <div class="edit-banner" id="editBanner" onclick="exitEditMode()">EDITING MODE - Tap here to resume live</div>
   <div class="main">
     <div class="chinese-area" id="chineseArea">
       <div class="chinese-text" id="chineseText" contenteditable="true"></div>
@@ -191,6 +190,7 @@
       <div class="korean-text" id="koreanText" contenteditable="true"></div>
     </div>
   </div>
+  <div class="edit-banner" id="editBanner" onclick="exitEditMode()">EDITING MODE - Tap here to resume live</div>
 </div>
 
 <!-- Viewer mode -->
@@ -199,7 +199,7 @@
     <h1><span class="sync-dot" id="syncDot"></span> Live Translation</h1>
     <div class="font-controls">
       <button class="font-btn" onclick="changeFontSizeViewer(-4)">-</button>
-      <span class="font-size-label" id="fontLabelViewer">42px</span>
+      <span class="font-size-label" id="fontLabelViewer">28px</span>
       <button class="font-btn" onclick="changeFontSizeViewer(4)">+</button>
     </div>
   </div>
@@ -234,7 +234,7 @@
   let finalKorean = '';
   let finalChinese = '';
   let interimChinese = '';
-  let fontSize = 42;
+  let fontSize = 28;
   let recognition = null;
   let isEditing = false;
   let pendingQueue = []; // queue translations while editing
@@ -472,16 +472,19 @@
   });
 
   // ─── VIEWER MODE ───
-  let viewerFontSize = 42;
+  let viewerFontSize = 28;
   let lastTs = 0;
   let viewerAutoScroll = true;
   let viewerScrollTimer = null;
+  let viewerDisplayedText = '';
+  let typewriterTimer = null;
+  let typewriterTarget = '';
+  let typewriterInterim = '';
 
   function setupViewer() {
     document.getElementById('syncDot').classList.add('connected');
     setInterval(fetchSync, 500);
 
-    // detect manual scroll up → pause auto-scroll
     const viewerArea = document.getElementById('viewerChinese').parentElement;
     viewerArea.addEventListener('scroll', () => {
       const atBottom = viewerArea.scrollTop + viewerArea.clientHeight >= viewerArea.scrollHeight - 30;
@@ -489,7 +492,6 @@
         viewerAutoScroll = true;
       } else {
         viewerAutoScroll = false;
-        // resume auto-scroll after 5 seconds of no manual scroll
         clearTimeout(viewerScrollTimer);
         viewerScrollTimer = setTimeout(() => { viewerAutoScroll = true; viewerScrollToBottom(); }, 5000);
       }
@@ -501,20 +503,38 @@
     if (viewerArea) viewerArea.scrollTop = viewerArea.scrollHeight;
   }
 
+  function startTypewriter(fullText, interim) {
+    typewriterTarget = fullText;
+    typewriterInterim = interim;
+    if (typewriterTimer) return;
+    runTypewriter();
+  }
+
+  function runTypewriter() {
+    const el = document.getElementById('viewerChinese');
+    if (viewerDisplayedText.length < typewriterTarget.length) {
+      viewerDisplayedText = typewriterTarget.substring(0, viewerDisplayedText.length + 1);
+      const remaining = typewriterTarget.substring(viewerDisplayedText.length);
+      el.innerHTML = viewerDisplayedText +
+        (remaining ? '<span class="interim">' + remaining + '</span>' : '') +
+        (typewriterInterim ? '<span class="interim">' + typewriterInterim + '</span>' : '');
+      if (viewerAutoScroll) viewerScrollToBottom();
+      typewriterTimer = setTimeout(runTypewriter, 30);
+    } else {
+      el.innerHTML = viewerDisplayedText +
+        (typewriterInterim ? '<span class="interim">' + typewriterInterim + '</span>' : '');
+      if (viewerAutoScroll) viewerScrollToBottom();
+      typewriterTimer = null;
+    }
+  }
+
   async function fetchSync() {
     try {
       const res = await fetch(SYNC_URL);
       const data = await res.json();
       if (data.ts > lastTs) {
         lastTs = data.ts;
-        const el = document.getElementById('viewerChinese');
-        const interim = data.interimChinese || '';
-        if (interim) {
-          el.innerHTML = (data.chinese || '') + '<span class="interim">' + interim + '</span>';
-        } else {
-          el.innerText = data.chinese || '';
-        }
-        if (viewerAutoScroll) viewerScrollToBottom();
+        startTypewriter(data.chinese || '', data.interimChinese || '');
       }
       document.getElementById('syncDot').classList.add('connected');
     } catch (e) {
