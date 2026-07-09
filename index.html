@@ -85,17 +85,21 @@
   .font-btn:hover { background: #444; }
   .font-size-label { font-size: 12px; color: #888; min-width: 32px; text-align: center; }
 
-  /* Edit banner */
+  /* Edit banner - fixed bottom */
   .edit-banner {
     display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
     background: #e94560;
     color: white;
-    padding: 10px 16px;
+    padding: 14px 16px;
     text-align: center;
-    font-size: 14px;
+    font-size: 16px;
     font-weight: 600;
     cursor: pointer;
-    z-index: 10;
+    z-index: 100;
   }
   .edit-banner.visible { display: block; }
 
@@ -470,10 +474,31 @@
   // ─── VIEWER MODE ───
   let viewerFontSize = 42;
   let lastTs = 0;
+  let viewerAutoScroll = true;
+  let viewerScrollTimer = null;
 
   function setupViewer() {
     document.getElementById('syncDot').classList.add('connected');
     setInterval(fetchSync, 500);
+
+    // detect manual scroll up → pause auto-scroll
+    const viewerArea = document.getElementById('viewerChinese').parentElement;
+    viewerArea.addEventListener('scroll', () => {
+      const atBottom = viewerArea.scrollTop + viewerArea.clientHeight >= viewerArea.scrollHeight - 30;
+      if (atBottom) {
+        viewerAutoScroll = true;
+      } else {
+        viewerAutoScroll = false;
+        // resume auto-scroll after 5 seconds of no manual scroll
+        clearTimeout(viewerScrollTimer);
+        viewerScrollTimer = setTimeout(() => { viewerAutoScroll = true; viewerScrollToBottom(); }, 5000);
+      }
+    });
+  }
+
+  function viewerScrollToBottom() {
+    const viewerArea = document.getElementById('viewerChinese').parentElement;
+    if (viewerArea) viewerArea.scrollTop = viewerArea.scrollHeight;
   }
 
   async function fetchSync() {
@@ -489,6 +514,7 @@
         } else {
           el.innerText = data.chinese || '';
         }
+        if (viewerAutoScroll) viewerScrollToBottom();
       }
       document.getElementById('syncDot').classList.add('connected');
     } catch (e) {
