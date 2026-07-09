@@ -542,7 +542,19 @@
     const ct = document.getElementById('chineseText');
     const kt = document.getElementById('koreanText');
 
+    // Enter key = finish editing and resume live (Shift+Enter for newline)
+    function enterKeyExits(el) {
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          el.blur();
+          exitEditMode();
+        }
+      });
+    }
+
     if (ct) {
+      enterKeyExits(ct);
       ct.addEventListener('focus', () => enterEditMode());
       ct.addEventListener('input', () => {
         finalChinese = ct.innerText;
@@ -552,6 +564,7 @@
 
     if (kt) {
       let koreanEditTimer = null;
+      enterKeyExits(kt);
       kt.addEventListener('focus', () => enterEditMode());
       kt.addEventListener('input', () => {
         finalKorean = kt.innerText;
