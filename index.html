@@ -509,6 +509,14 @@
   function startTypewriter(fullText, interim) {
     typewriterTarget = fullText;
     typewriterInterim = interim;
+    // if the confirmed text diverges from what we already displayed,
+    // roll back to the common prefix so the correction is applied
+    if (!typewriterTarget.startsWith(viewerDisplayedText)) {
+      let common = 0;
+      const max = Math.min(viewerDisplayedText.length, typewriterTarget.length);
+      while (common < max && viewerDisplayedText[common] === typewriterTarget[common]) common++;
+      viewerDisplayedText = typewriterTarget.substring(0, common);
+    }
     if (typewriterTimer) return;
     runTypewriter();
   }
