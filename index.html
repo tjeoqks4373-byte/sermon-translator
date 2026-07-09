@@ -7,6 +7,11 @@
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; overflow: hidden; }
+  .app-container {
+    flex-direction: column;
+    height: 100vh;
+    height: 100dvh; /* dynamic viewport height - accounts for mobile browser bars */
+  }
   body {
     font-family: -apple-system, 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
     background: #1a1a2e;
@@ -162,7 +167,7 @@
 </div>
 
 <!-- Controller mode -->
-<div id="controllerUI" style="display:none; flex-direction:column; height:100vh;">
+<div id="controllerUI" class="app-container" style="display:none;">
   <div class="header">
     <h1>Controller</h1>
     <div class="controls">
@@ -190,7 +195,7 @@
 </div>
 
 <!-- Viewer mode -->
-<div id="viewerUI" style="display:none; flex-direction:column; height:100vh;">
+<div id="viewerUI" class="app-container" style="display:none;">
   <div class="viewer-header">
     <h1><span class="sync-dot" id="syncDot"></span> Live Translation</h1>
     <div class="font-controls">
