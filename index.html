@@ -44,6 +44,8 @@
   .btn-stop:hover { background: #c73e54; }
   .btn-clear { background: #333; color: #ccc; }
   .btn-clear:hover { background: #444; }
+  .btn-edit { background: #e94560; color: white; font-size: 13px; padding: 6px 14px; }
+  .btn-edit:hover { background: #c73e54; }
   .btn:disabled { opacity: 0.4; cursor: not-allowed; }
   @keyframes pulse {
     0%, 100% { box-shadow: 0 0 0 0 rgba(78, 204, 163, 0.4); }
@@ -51,11 +53,13 @@
   }
   .status { font-size: 13px; color: #888; }
   .status.active { color: #4ecca3; }
+  .status.editing { color: #e94560; }
   .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   .chinese-area {
     flex: 1; padding: 24px; overflow-y: auto;
     display: flex; flex-direction: column; justify-content: flex-end;
   }
+  .chinese-area.editing-mode { border: 2px solid #e94560; }
   .chinese-text {
     font-size: 42px; line-height: 1.6; color: #fff;
     word-break: break-word; outline: none; min-height: 50px;
@@ -80,6 +84,20 @@
   }
   .font-btn:hover { background: #444; }
   .font-size-label { font-size: 12px; color: #888; min-width: 32px; text-align: center; }
+
+  /* Edit banner */
+  .edit-banner {
+    display: none;
+    background: #e94560;
+    color: white;
+    padding: 10px 16px;
+    text-align: center;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    z-index: 10;
+  }
+  .edit-banner.visible { display: block; }
 
   /* Mode selector */
   .mode-select {
@@ -160,6 +178,7 @@
       <button class="btn btn-stop" id="stopBtn" onclick="stopListening()" disabled>Stop</button>
     </div>
   </div>
+  <div class="edit-banner" id="editBanner" onclick="exitEditMode()">EDITING MODE - Tap here to resume live</div>
   <div class="main">
     <div class="chinese-area" id="chineseArea">
       <div class="chinese-text" id="chineseText" contenteditable="true"></div>
@@ -210,13 +229,43 @@
   let recState = 'stopped';
   let finalKorean = '';
   let finalChinese = '';
+  let interimChinese = '';
   let fontSize = 42;
   let recognition = null;
+  let isEditing = false;
+  let pendingQueue = []; // queue translations while editing
 
   function setupController() {
     if (!SpeechRecognition) {
       alert('This browser does not support Speech Recognition. Please use Chrome.');
     }
+  }
+
+  function enterEditMode() {
+    if (isEditing) return;
+    isEditing = true;
+    document.getElementById('editBanner').classList.add('visible');
+    document.getElementById('chineseArea').classList.add('editing-mode');
+    const statusEl = document.getElementById('status');
+    statusEl.textContent = 'Editing';
+    statusEl.classList.add('editing');
+  }
+
+  function exitEditMode() {
+    isEditing = false;
+    document.getElementById('editBanner').classList.remove('visible');
+    document.getElementById('chineseArea').classList.remove('editing-mode');
+    // apply queued translations
+    const ct = document.getElementById('chineseText');
+    finalChinese = ct.innerText;
+    if (pendingQueue.length > 0) {
+      finalChinese += pendingQueue.join('');
+      pendingQueue = [];
+      ct.innerText = finalChinese;
+    }
+    syncToServer();
+    scrollToBottom();
+    updateButtons();
   }
 
   function syncToServer() {
@@ -226,6 +275,7 @@
       body: JSON.stringify({
         korean: finalKorean,
         chinese: finalChinese,
+        interimChinese: interimChinese,
         ts: Date.now()
       })
     }).catch(() => {});
@@ -266,10 +316,12 @@
         translateText(newFinal, true);
       }
       const kt = document.getElementById('koreanText');
-      kt.innerHTML = finalKorean +
-        (interimTranscript ? '<span class="interim">' + interimTranscript + '</span>' : '');
+      if (!isEditing) {
+        kt.innerHTML = finalKorean +
+          (interimTranscript ? '<span class="interim">' + interimTranscript + '</span>' : '');
+      }
       if (interimTranscript) debounceTranslateInterim(interimTranscript);
-      scrollToBottom();
+      if (!isEditing) scrollToBottom();
     };
 
     return r;
@@ -280,6 +332,13 @@
     const pauseBtn = document.getElementById('pauseBtn');
     const stopBtn = document.getElementById('stopBtn');
     const statusEl = document.getElementById('status');
+    if (isEditing) {
+      statusEl.textContent = 'Editing';
+      statusEl.classList.remove('active');
+      statusEl.classList.add('editing');
+      return;
+    }
+    statusEl.classList.remove('editing');
     if (recState === 'stopped') {
       playBtn.disabled = false; pauseBtn.disabled = true; stopBtn.disabled = true;
       playBtn.classList.remove('active');
@@ -325,15 +384,25 @@
       });
       const data = await res.json();
       if (data.ok) {
-        const ct = document.getElementById('chineseText');
         if (isFinal) {
-          finalChinese += data.translated;
-          ct.innerHTML = finalChinese;
-          syncToServer();
+          if (isEditing) {
+            // queue it, don't touch the DOM
+            pendingQueue.push(data.translated);
+            interimChinese = '';
+          } else {
+            finalChinese += data.translated;
+            interimChinese = '';
+            document.getElementById('chineseText').innerHTML = finalChinese;
+          }
         } else {
-          ct.innerHTML = finalChinese + '<span class="interim">' + data.translated + '</span>';
+          interimChinese = data.translated;
+          if (!isEditing) {
+            document.getElementById('chineseText').innerHTML =
+              finalChinese + '<span class="interim">' + data.translated + '</span>';
+          }
         }
-        scrollToBottom();
+        syncToServer();
+        if (!isEditing) scrollToBottom();
       }
     } catch (err) { console.error('Translation error:', err); }
   }
@@ -344,7 +413,8 @@
   }
 
   function clearAll() {
-    finalKorean = ''; finalChinese = '';
+    finalKorean = ''; finalChinese = ''; interimChinese = '';
+    pendingQueue = [];
     document.getElementById('koreanText').innerHTML = '';
     document.getElementById('chineseText').innerHTML = '';
     syncToServer();
@@ -356,37 +426,45 @@
     document.getElementById('fontLabel').textContent = fontSize + 'px';
   }
 
-  // Korean edit → re-translate + sync
+  // Chinese text focus → enter edit mode
+  // Chinese text blur → exit edit mode
   document.addEventListener('DOMContentLoaded', () => {
     const ct = document.getElementById('chineseText');
     const kt = document.getElementById('koreanText');
-    if (ct) ct.addEventListener('input', () => {
-      finalChinese = ct.innerText;
-      syncToServer();
-    });
 
-    let koreanEditTimer = null;
-    if (kt) kt.addEventListener('input', () => {
-      finalKorean = kt.innerText;
-      clearTimeout(koreanEditTimer);
-      koreanEditTimer = setTimeout(async () => {
-        const text = kt.innerText.trim();
-        if (!text) return;
-        try {
-          const res = await fetch(API_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: text })
-          });
-          const data = await res.json();
-          if (data.ok) {
-            finalChinese = data.translated;
-            ct.innerText = finalChinese;
-            syncToServer();
-          }
-        } catch (err) { console.error('Re-translation error:', err); }
-      }, 800);
-    });
+    if (ct) {
+      ct.addEventListener('focus', () => enterEditMode());
+      ct.addEventListener('input', () => {
+        finalChinese = ct.innerText;
+        syncToServer();
+      });
+    }
+
+    if (kt) {
+      let koreanEditTimer = null;
+      kt.addEventListener('focus', () => enterEditMode());
+      kt.addEventListener('input', () => {
+        finalKorean = kt.innerText;
+        clearTimeout(koreanEditTimer);
+        koreanEditTimer = setTimeout(async () => {
+          const text = kt.innerText.trim();
+          if (!text) return;
+          try {
+            const res = await fetch(API_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text: text })
+            });
+            const data = await res.json();
+            if (data.ok) {
+              finalChinese = data.translated;
+              ct.innerText = finalChinese;
+              syncToServer();
+            }
+          } catch (err) { console.error('Re-translation error:', err); }
+        }, 800);
+      });
+    }
   });
 
   // ─── VIEWER MODE ───
@@ -404,8 +482,15 @@
       const data = await res.json();
       if (data.ts > lastTs) {
         lastTs = data.ts;
-        document.getElementById('viewerChinese').innerText = data.chinese;
+        const el = document.getElementById('viewerChinese');
+        const interim = data.interimChinese || '';
+        if (interim) {
+          el.innerHTML = (data.chinese || '') + '<span class="interim">' + interim + '</span>';
+        } else {
+          el.innerText = data.chinese || '';
+        }
       }
+      document.getElementById('syncDot').classList.add('connected');
     } catch (e) {
       document.getElementById('syncDot').classList.remove('connected');
     }
